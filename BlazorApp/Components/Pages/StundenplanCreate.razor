@@ -1,0 +1,201 @@
+@page "/stundenplan/create"
+@rendermode InteractiveServer
+
+@using BlazorApp.Models
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<MyDbContext> DbFactory
+@inject NavigationManager Nav
+
+<PageTitle>Stundenplan - Erstellen</PageTitle>
+
+<h1>Stundenplan (Erstellen)</h1>
+
+@if (!string.IsNullOrWhiteSpace(_error))
+{
+    <div class="alert alert-danger" role="alert">@_error</div>
+}
+@if (!string.IsNullOrWhiteSpace(_success))
+{
+    <div class="alert alert-success" role="alert">@_success</div>
+}
+
+@if (_isLoading)
+{
+    <p><em>Lade Daten…</em></p>
+}
+else
+{
+    <div class="card">
+        <div class="card-header">
+            <strong>Neuer Stundenplaneintrag</strong>
+        </div>
+        <div class="card-body">
+            <EditForm Model="_form" OnValidSubmit="SaveAsync">
+                <DataAnnotationsValidator />
+                <ValidationSummary />
+
+                <div class="row g-3">
+                    <div class="col-12 col-md-6">
+                        <label class="form-label">Datum</label>
+                        <InputDate class="form-control" @bind-Value="_form.Datum" />
+                    </div>
+                    <div class="col-12 col-md-6">
+                        <label class="form-label">Uhrzeit</label>
+                        <InputText class="form-control" type="time" @bind-Value="_form.UhrzeitText" />
+                    </div>
+                    <div class="col-12 col-md-4">
+                        <label class="form-label">Klasse</label>
+                        <InputSelect class="form-select" @bind-Value="_form.KlassenId">
+                            <option value="0" disabled>Bitte wählen…</option>
+                            @foreach (var k in _klassen)
+                            {
+                                <option value="@k.KlassenId">@k.KlassenName</option>
+                            }
+                        </InputSelect>
+                    </div>
+                    <div class="col-12 col-md-4">
+                        <label class="form-label">Lehrer</label>
+                        <InputSelect class="form-select" @bind-Value="_form.LehrerId">
+                            <option value="0" disabled>Bitte wählen…</option>
+                            @foreach (var l in _lehrer)
+                            {
+                                <option value="@l.LehrerId">@l.LehrerName</option>
+                            }
+                        </InputSelect>
+                    </div>
+                    <div class="col-12 col-md-4">
+                        <label class="form-label">Zimmer</label>
+                        <InputSelect class="form-select" @bind-Value="_form.ZimmerId">
+                            <option value="0" disabled>Bitte wählen…</option>
+                            @foreach (var z in _zimmer)
+                            {
+                                <option value="@z.ZimmerId">@z.ZimmerBezeichnung</option>
+                            }
+                        </InputSelect>
+                    </div>
+                </div>
+
+                <div class="d-flex gap-2 mt-3">
+                    <button class="btn btn-primary" type="submit" disabled="@_isSaving">Speichern</button>
+                    <button class="btn btn-outline-secondary" type="button" @onclick="ResetForm" disabled="@_isSaving">Zurücksetzen</button>
+                    <button class="btn btn-outline-dark ms-auto" type="button" @onclick='() => Nav.NavigateTo("/stundenplan/read")' disabled="@_isSaving">
+                        Zur Anzeige
+                    </button>
+                </div>
+            </EditForm>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _isLoading = true;
+    private bool _isSaving = false;
+    private string? _error;
+    private string? _success;
+
+    private List<Lehrer> _lehrer = new();
+    private List<Klassen> _klassen = new();
+    private List<Schulzimmer> _zimmer = new();
+
+    private StundenplanFormModel _form = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadLookupsAsync();
+        ResetForm();
+        _isLoading = false;
+    }
+
+    private async Task LoadLookupsAsync()
+    {
+        _error = null;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            _lehrer = await db.Lehrers.OrderBy(x => x.LehrerName).AsNoTracking().ToListAsync();
+            _klassen = await db.Klassens.OrderBy(x => x.KlassenName).AsNoTracking().ToListAsync();
+            _zimmer = await db.Schulzimmers.OrderBy(x => x.ZimmerBezeichnung).AsNoTracking().ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = $"Fehler beim Laden der Stammdaten: {ex.Message}";
+        }
+    }
+
+    private void ResetForm()
+    {
+        _success = null;
+        _form = new StundenplanFormModel
+        {
+            Datum = DateTime.Today,
+            KlassenId = _klassen.Count > 0 ? _klassen[0].KlassenId : 0,
+            LehrerId = _lehrer.Count > 0 ? _lehrer[0].LehrerId : 0,
+            ZimmerId = _zimmer.Count > 0 ? _zimmer[0].ZimmerId : 0
+        };
+        _form.SetUhrzeit(new TimeSpan(8, 0, 0));
+    }
+
+    private async Task SaveAsync()
+    {
+        _error = null;
+        _success = null;
+        _isSaving = true;
+        try
+        {
+            if (_form.KlassenId <= 0 || _form.LehrerId <= 0 || _form.ZimmerId <= 0)
+            {
+                _error = "Bitte Klasse, Lehrer und Zimmer auswählen.";
+                return;
+            }
+
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var entity = new Stundenplan
+            {
+                KlassenId = _form.KlassenId,
+                LehrerId = _form.LehrerId,
+                ZimmerId = _form.ZimmerId,
+                Datum = DateOnly.FromDateTime(_form.Datum),
+                Uhrzeit = TimeOnly.FromTimeSpan(_form.Uhrzeit)
+            };
+            db.Stundenplans.Add(entity);
+            await db.SaveChangesAsync();
+
+            _success = $"Eintrag gespeichert (ID: {entity.StundenplanId}).";
+            ResetForm();
+        }
+        catch (Exception ex)
+        {
+            _error = $"Fehler beim Speichern: {ex.Message}";
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    private sealed class StundenplanFormModel
+    {
+        public int KlassenId { get; set; }
+        public int LehrerId { get; set; }
+        public int ZimmerId { get; set; }
+
+        public DateTime Datum { get; set; } = DateTime.Today;
+
+        private TimeSpan _uhrzeit = new(8, 0, 0);
+        public TimeSpan Uhrzeit => _uhrzeit;
+
+        public string UhrzeitText
+        {
+            get => _uhrzeit.ToString(@"hh\:mm");
+            set
+            {
+                if (TimeSpan.TryParse(value, out var ts))
+                    _uhrzeit = ts;
+            }
+        }
+
+        public void SetUhrzeit(TimeSpan ts) => _uhrzeit = ts;
+    }
+}
+
+

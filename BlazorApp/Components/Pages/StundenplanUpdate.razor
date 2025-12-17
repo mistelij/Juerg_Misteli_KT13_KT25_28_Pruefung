@@ -1,0 +1,335 @@
+@page "/stundenplan/update"
+@page "/stundenplan/update/{Id:int}"
+@rendermode InteractiveServer
+
+@using BlazorApp.Models
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<MyDbContext> DbFactory
+@inject NavigationManager Nav
+
+<PageTitle>Stundenplan - Bearbeiten</PageTitle>
+
+<h1>Stundenplan (Bearbeiten)</h1>
+
+@if (!string.IsNullOrWhiteSpace(_error))
+{
+    <div class="alert alert-danger" role="alert">@_error</div>
+}
+@if (!string.IsNullOrWhiteSpace(_success))
+{
+    <div class="alert alert-success" role="alert">@_success</div>
+}
+
+@if (_isLoading)
+{
+    <p><em>Lade Daten…</em></p>
+}
+else
+{
+    <div class="row g-4">
+        <div class="col-12 col-lg-7">
+            <div class="card">
+                <div class="card-header">
+                    <strong>Eintrag auswählen</strong>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Datum</th>
+                                    <th>Uhrzeit</th>
+                                    <th>Klasse</th>
+                                    <th>Lehrer</th>
+                                    <th>Zimmer</th>
+                                    <th>ID</th>
+                                    <th class="text-end">Aktion</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @if (_entries.Count == 0)
+                                {
+                                    <tr>
+                                        <td colspan="7" class="text-center py-4">
+                                            <em>Keine Einträge vorhanden.</em>
+                                        </td>
+                                    </tr>
+                                }
+                                else
+                                {
+                                    @foreach (var e in _entries)
+                                    {
+                                        var isSelected = _selectedId == e.StundenplanId;
+                                        <tr class="@(isSelected ? "table-primary" : null)">
+                                            <td>@e.Datum.ToString("dd.MM.yyyy")</td>
+                                            <td>@e.Uhrzeit.ToString("HH\\:mm")</td>
+                                            <td>@e.Klassen?.KlassenName</td>
+                                            <td>@e.Lehrer?.LehrerName</td>
+                                            <td>@e.Zimmer?.ZimmerBezeichnung</td>
+                                            <td>@e.StundenplanId</td>
+                                            <td class="text-end">
+                                                <button class="btn btn-sm btn-outline-primary" @onclick="() => Select(e.StundenplanId)">
+                                                    Bearbeiten
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    }
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-lg-5">
+            <div class="card">
+                <div class="card-header">
+                    <strong>@(_selectedId is null ? "Bitte Eintrag auswählen" : $"Bearbeiten (ID: {_selectedId})")</strong>
+                </div>
+                <div class="card-body">
+                    @if (_selectedId is null)
+                    {
+                        <p class="mb-0"><em>Links einen Eintrag auswählen.</em></p>
+                    }
+                    else
+                    {
+                        <EditForm Model="_form" OnValidSubmit="SaveAsync">
+                            <DataAnnotationsValidator />
+                            <ValidationSummary />
+
+                            <div class="mb-3">
+                                <label class="form-label">Datum</label>
+                                <InputDate class="form-control" @bind-Value="_form.Datum" />
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label">Uhrzeit</label>
+                                <InputText class="form-control" type="time" @bind-Value="_form.UhrzeitText" />
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label">Klasse</label>
+                                <InputSelect class="form-select" @bind-Value="_form.KlassenId">
+                                    <option value="0" disabled>Bitte wählen…</option>
+                                    @foreach (var k in _klassen)
+                                    {
+                                        <option value="@k.KlassenId">@k.KlassenName</option>
+                                    }
+                                </InputSelect>
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label">Lehrer</label>
+                                <InputSelect class="form-select" @bind-Value="_form.LehrerId">
+                                    <option value="0" disabled>Bitte wählen…</option>
+                                    @foreach (var l in _lehrer)
+                                    {
+                                        <option value="@l.LehrerId">@l.LehrerName</option>
+                                    }
+                                </InputSelect>
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label">Zimmer</label>
+                                <InputSelect class="form-select" @bind-Value="_form.ZimmerId">
+                                    <option value="0" disabled>Bitte wählen…</option>
+                                    @foreach (var z in _zimmer)
+                                    {
+                                        <option value="@z.ZimmerId">@z.ZimmerBezeichnung</option>
+                                    }
+                                </InputSelect>
+                            </div>
+
+                            <div class="d-flex gap-2">
+                                <button class="btn btn-primary" type="submit" disabled="@_isSaving">Speichern</button>
+                                <button class="btn btn-outline-secondary" type="button" @onclick="ReloadAsync" disabled="@_isSaving">Neu laden</button>
+                                <button class="btn btn-outline-dark ms-auto" type="button" @onclick='() => Nav.NavigateTo("/stundenplan/read")' disabled="@_isSaving">
+                                    Zur Anzeige
+                                </button>
+                            </div>
+                        </EditForm>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int? Id { get; set; }
+
+    private bool _isLoading = true;
+    private bool _isSaving = false;
+    private string? _error;
+    private string? _success;
+
+    private List<Stundenplan> _entries = new();
+    private List<Lehrer> _lehrer = new();
+    private List<Klassen> _klassen = new();
+    private List<Schulzimmer> _zimmer = new();
+
+    private int? _selectedId;
+    private StundenplanFormModel _form = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ReloadAsync();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Id is not null && Id != _selectedId)
+        {
+            await SelectAsync(Id.Value);
+        }
+    }
+
+    private async Task ReloadAsync()
+    {
+        _error = null;
+        _success = null;
+        _isLoading = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            _lehrer = await db.Lehrers.OrderBy(x => x.LehrerName).AsNoTracking().ToListAsync();
+            _klassen = await db.Klassens.OrderBy(x => x.KlassenName).AsNoTracking().ToListAsync();
+            _zimmer = await db.Schulzimmers.OrderBy(x => x.ZimmerBezeichnung).AsNoTracking().ToListAsync();
+
+            _entries = await db.Stundenplans
+                .Include(x => x.Lehrer)
+                .Include(x => x.Klassen)
+                .Include(x => x.Zimmer)
+                .OrderBy(x => x.Datum)
+                .ThenBy(x => x.Uhrzeit)
+                .AsNoTracking()
+                .ToListAsync();
+
+            if (_selectedId is not null)
+            {
+                // refresh selected into form (in case it changed)
+                await SelectAsync(_selectedId.Value, navigate: false);
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Fehler beim Laden: {ex.Message}";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private void Select(int id) => _ = SelectAsync(id);
+
+    private async Task SelectAsync(int id, bool navigate = true)
+    {
+        _error = null;
+        _success = null;
+        _selectedId = id;
+
+        if (navigate)
+        {
+            Nav.NavigateTo($"/stundenplan/update/{id}");
+        }
+
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var entity = await db.Stundenplans.AsNoTracking().FirstOrDefaultAsync(x => x.StundenplanId == id);
+            if (entity is null)
+            {
+                _error = "Eintrag wurde nicht gefunden (evtl. bereits gelöscht).";
+                _selectedId = null;
+                return;
+            }
+
+            _form = new StundenplanFormModel
+            {
+                KlassenId = entity.KlassenId,
+                LehrerId = entity.LehrerId,
+                ZimmerId = entity.ZimmerId,
+                Datum = entity.Datum.ToDateTime(TimeOnly.MinValue)
+            };
+            _form.SetUhrzeit(entity.Uhrzeit.ToTimeSpan());
+        }
+        catch (Exception ex)
+        {
+            _error = $"Fehler beim Laden des Eintrags: {ex.Message}";
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        _error = null;
+        _success = null;
+        if (_selectedId is null)
+            return;
+
+        _isSaving = true;
+        try
+        {
+            if (_form.KlassenId <= 0 || _form.LehrerId <= 0 || _form.ZimmerId <= 0)
+            {
+                _error = "Bitte Klasse, Lehrer und Zimmer auswählen.";
+                return;
+            }
+
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var entity = await db.Stundenplans.FirstOrDefaultAsync(x => x.StundenplanId == _selectedId.Value);
+            if (entity is null)
+            {
+                _error = "Eintrag wurde nicht gefunden (evtl. bereits gelöscht).";
+                _selectedId = null;
+                return;
+            }
+
+            entity.KlassenId = _form.KlassenId;
+            entity.LehrerId = _form.LehrerId;
+            entity.ZimmerId = _form.ZimmerId;
+            entity.Datum = DateOnly.FromDateTime(_form.Datum);
+            entity.Uhrzeit = TimeOnly.FromTimeSpan(_form.Uhrzeit);
+
+            await db.SaveChangesAsync();
+            _success = "Eintrag gespeichert.";
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = $"Fehler beim Speichern: {ex.Message}";
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    private sealed class StundenplanFormModel
+    {
+        public int KlassenId { get; set; }
+        public int LehrerId { get; set; }
+        public int ZimmerId { get; set; }
+
+        public DateTime Datum { get; set; } = DateTime.Today;
+
+        private TimeSpan _uhrzeit = new(8, 0, 0);
+        public TimeSpan Uhrzeit => _uhrzeit;
+
+        public string UhrzeitText
+        {
+            get => _uhrzeit.ToString(@"hh\:mm");
+            set
+            {
+                if (TimeSpan.TryParse(value, out var ts))
+                    _uhrzeit = ts;
+            }
+        }
+
+        public void SetUhrzeit(TimeSpan ts) => _uhrzeit = ts;
+    }
+}
+
+
