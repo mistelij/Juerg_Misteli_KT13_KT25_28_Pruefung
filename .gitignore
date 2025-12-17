@@ -1,0 +1,38 @@
+﻿# Build results
+**/bin/
+**/obj/
+
+# Visual Studio / VS Code user-specific files
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vs/
+.vscode/
+
+# Rider / JetBrains
+.idea/
+
+# OS files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.BIN/
+.DS_Store
+
+# Logs
+*.log
+
+# NuGet
+**/packages/
+*.nupkg
+*.snupkg
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# ASP.NET Core / publish outputs
+**/publish/
+
+# Secrets (prefer user-secrets/environment vars)
+secrets.json
