@@ -5,7 +5,6 @@
 @using BlazorApp.Models
 @using Microsoft.EntityFrameworkCore
 @inject IDbContextFactory<MyDbContext> DbFactory
-@inject IJSRuntime JS
 @inject NavigationManager Nav
 
 <PageTitle>Stundenplan - Löschen</PageTitle>
@@ -66,8 +65,8 @@ else
                                     <td>@e.Zimmer?.ZimmerBezeichnung</td>
                                     <td>@e.StundenplanId</td>
                                     <td class="text-end">
-                                        <button class="btn btn-sm btn-outline-danger" @onclick="() => AskDelete(e.StundenplanId)">
-                                            Löschen
+                                        <button class="btn btn-sm btn-outline-danger" @onclick="() => SelectForDelete(e.StundenplanId)">
+                                            Auswählen
                                         </button>
                                     </td>
                                 </tr>
@@ -78,6 +77,35 @@ else
             </div>
         </div>
     </div>
+
+    @if (_selectedId is not null && _selectedEntry is not null)
+    {
+        <div class="alert alert-warning mt-3" role="alert">
+            <div class="d-flex align-items-start gap-3">
+                <div class="flex-grow-1">
+                    <strong>Löschen bestätigen</strong>
+                    <div class="mt-1">
+                        Du willst löschen:
+                        <br />
+                        <span class="fw-semibold">ID:</span> @_selectedEntry.StundenplanId,
+                        <span class="fw-semibold">Datum:</span> @_selectedEntry.Datum.ToString("dd.MM.yyyy"),
+                        <span class="fw-semibold">Zeit:</span> @_selectedEntry.Uhrzeit.ToString("HH\\:mm"),
+                        <span class="fw-semibold">Klasse:</span> @_selectedEntry.Klassen?.KlassenName,
+                        <span class="fw-semibold">Lehrer:</span> @_selectedEntry.Lehrer?.LehrerName,
+                        <span class="fw-semibold">Zimmer:</span> @_selectedEntry.Zimmer?.ZimmerBezeichnung
+                    </div>
+                </div>
+                <div class="d-flex flex-column gap-2">
+                    <button class="btn btn-danger" @onclick="ConfirmDeleteAsync" disabled="@_isDeleting">
+                        Löschen bestätigen
+                    </button>
+                    <button class="btn btn-outline-secondary" @onclick="CancelSelection" disabled="@_isDeleting">
+                        Abbrechen
+                    </button>
+                </div>
+            </div>
+        </div>
+    }
 
     <div class="mt-3 d-flex gap-2">
         <button class="btn btn-outline-dark" type="button" @onclick='() => Nav.NavigateTo("/stundenplan/read")'>
@@ -93,10 +121,13 @@ else
     [Parameter] public int? Id { get; set; }
 
     private bool _isLoading = true;
+    private bool _isDeleting = false;
     private string? _error;
     private string? _success;
 
     private List<Stundenplan> _entries = new();
+    private int? _selectedId;
+    private Stundenplan? _selectedEntry;
 
     protected override async Task OnInitializedAsync()
     {
@@ -107,7 +138,7 @@ else
     {
         if (Id is not null)
         {
-            await AskDeleteAsync(Id.Value, navigate: false);
+            await SelectForDeleteAsync(Id.Value, navigate: false);
         }
     }
 
@@ -137,9 +168,9 @@ else
         }
     }
 
-    private void AskDelete(int id) => _ = AskDeleteAsync(id);
+    private void SelectForDelete(int id) => _ = SelectForDeleteAsync(id);
 
-    private async Task AskDeleteAsync(int id, bool navigate = true)
+    private async Task SelectForDeleteAsync(int id, bool navigate = true)
     {
         _error = null;
         _success = null;
@@ -148,31 +179,73 @@ else
         {
             Nav.NavigateTo($"/stundenplan/delete/{id}");
         }
-
-        var ok = await JS.InvokeAsync<bool>("confirm", $"Eintrag (ID: {id}) wirklich löschen?");
-        if (!ok)
-            return;
-
+        _selectedId = id;
         try
         {
             await using var db = await DbFactory.CreateDbContextAsync();
-            var entity = await db.Stundenplans.FirstOrDefaultAsync(x => x.StundenplanId == id);
+            _selectedEntry = await db.Stundenplans
+                .Include(x => x.Lehrer)
+                .Include(x => x.Klassen)
+                .Include(x => x.Zimmer)
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.StundenplanId == id);
+
+            if (_selectedEntry is null)
+            {
+                _error = "Eintrag wurde nicht gefunden (evtl. bereits gelöscht).";
+                _selectedId = null;
+                await ReloadAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Fehler beim Laden des Eintrags: {ex.Message}";
+        }
+    }
+
+    private void CancelSelection()
+    {
+        _error = null;
+        _success = null;
+        _selectedId = null;
+        _selectedEntry = null;
+        Nav.NavigateTo("/stundenplan/delete", forceLoad: false);
+    }
+
+    private async Task ConfirmDeleteAsync()
+    {
+        _error = null;
+        _success = null;
+        if (_selectedId is null)
+            return;
+
+        _isDeleting = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var entity = await db.Stundenplans.FirstOrDefaultAsync(x => x.StundenplanId == _selectedId.Value);
             if (entity is null)
             {
                 _error = "Eintrag wurde nicht gefunden (evtl. bereits gelöscht).";
+                CancelSelection();
                 await ReloadAsync();
                 return;
             }
 
             db.Stundenplans.Remove(entity);
             await db.SaveChangesAsync();
-            _success = $"Eintrag gelöscht (ID: {id}).";
+
+            _success = $"Eintrag gelöscht (ID: {_selectedId.Value}).";
+            CancelSelection();
             await ReloadAsync();
-            Nav.NavigateTo("/stundenplan/delete", forceLoad: false);
         }
         catch (Exception ex)
         {
             _error = $"Fehler beim Löschen: {ex.Message}";
+        }
+        finally
+        {
+            _isDeleting = false;
         }
     }
 }
