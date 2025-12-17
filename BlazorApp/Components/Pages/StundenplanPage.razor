@@ -1,0 +1,368 @@
+@page "/stundenplan"
+@rendermode InteractiveServer
+
+@using BlazorApp.Models
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<MyDbContext> DbFactory
+@inject IJSRuntime JS
+
+<PageTitle>Stundenplan</PageTitle>
+
+<h1>Stundenplan</h1>
+
+@if (!string.IsNullOrWhiteSpace(_error))
+{
+    <div class="alert alert-danger" role="alert">
+        @_error
+    </div>
+}
+
+@if (_isLoading)
+{
+    <p><em>Lade Daten…</em></p>
+}
+else
+{
+    <div class="row g-4">
+        <div class="col-12 col-lg-7">
+            <div class="card">
+                <div class="card-header">
+                    <strong>Alle Stundenplaneinträge</strong>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Datum</th>
+                                    <th>Uhrzeit</th>
+                                    <th>Klasse</th>
+                                    <th>Lehrer</th>
+                                    <th>Zimmer</th>
+                                    <th class="text-end">Aktionen</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @if (_entries.Count == 0)
+                                {
+                                    <tr>
+                                        <td colspan="6" class="text-center py-4">
+                                            <em>Keine Einträge vorhanden.</em>
+                                        </td>
+                                    </tr>
+                                }
+                                else
+                                {
+                                    @foreach (var e in _entries)
+                                    {
+                                        <tr>
+                                            <td>@e.Datum.ToString("dd.MM.yyyy")</td>
+                                            <td>@e.Uhrzeit.ToString("HH\\:mm")</td>
+                                            <td>@e.Klassen?.KlassenName</td>
+                                            <td>@e.Lehrer?.LehrerName</td>
+                                            <td>@e.Zimmer?.ZimmerBezeichnung</td>
+                                            <td class="text-end">
+                                                <button class="btn btn-sm btn-outline-primary me-2" @onclick="() => StartEdit(e)">
+                                                    Bearbeiten
+                                                </button>
+                                                <button class="btn btn-sm btn-outline-danger" @onclick="() => ConfirmDelete(e)">
+                                                    Löschen
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    }
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-lg-5">
+            <div class="card">
+                <div class="card-header">
+                    <strong>@(_editId is null ? "Neuer Eintrag" : $"Eintrag bearbeiten (ID: {_editId})")</strong>
+                </div>
+                <div class="card-body">
+                    <EditForm Model="_form" OnValidSubmit="SaveAsync">
+                        <DataAnnotationsValidator />
+                        <ValidationSummary />
+
+                        <div class="mb-3">
+                            <label class="form-label">Datum</label>
+                            <InputDate class="form-control" @bind-Value="_form.Datum" />
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Uhrzeit</label>
+                            <InputText class="form-control" type="time" @bind-Value="_form.UhrzeitText" />
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Klasse</label>
+                            <InputSelect class="form-select" @bind-Value="_form.KlassenId">
+                                <option value="0" disabled>Bitte wählen…</option>
+                                @foreach (var k in _klassen)
+                                {
+                                    <option value="@k.KlassenId">@k.KlassenName</option>
+                                }
+                            </InputSelect>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Lehrer</label>
+                            <InputSelect class="form-select" @bind-Value="_form.LehrerId">
+                                <option value="0" disabled>Bitte wählen…</option>
+                                @foreach (var l in _lehrer)
+                                {
+                                    <option value="@l.LehrerId">@l.LehrerName</option>
+                                }
+                            </InputSelect>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Zimmer</label>
+                            <InputSelect class="form-select" @bind-Value="_form.ZimmerId">
+                                <option value="0" disabled>Bitte wählen…</option>
+                                @foreach (var z in _zimmer)
+                                {
+                                    <option value="@z.ZimmerId">@z.ZimmerBezeichnung</option>
+                                }
+                            </InputSelect>
+                        </div>
+
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-primary" type="submit" disabled="@_isSaving">
+                                @(_editId is null ? "Erstellen" : "Speichern")
+                            </button>
+                            <button class="btn btn-outline-secondary" type="button" @onclick="ResetForm" disabled="@_isSaving">
+                                Abbrechen
+                            </button>
+                            <button class="btn btn-outline-dark ms-auto" type="button" @onclick="ReloadAsync" disabled="@_isSaving">
+                                Aktualisieren
+                            </button>
+                        </div>
+                    </EditForm>
+                </div>
+            </div>
+
+            <div class="small text-muted mt-2">
+                Hinweis: Falls die Dropdowns leer sind, fehlen Daten in den Tabellen <code>Lehrer</code>, <code>Klassen</code> oder <code>Schulzimmer</code>.
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _isLoading = true;
+    private bool _isSaving = false;
+    private string? _error;
+
+    private List<BlazorApp.Models.Stundenplan> _entries = new();
+    private List<Lehrer> _lehrer = new();
+    private List<Klassen> _klassen = new();
+    private List<Schulzimmer> _zimmer = new();
+
+    private int? _editId;
+    private StundenplanFormModel _form = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _error = null;
+        _isLoading = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            _lehrer = await db.Lehrers
+                .OrderBy(x => x.LehrerName)
+                .AsNoTracking()
+                .ToListAsync();
+
+            _klassen = await db.Klassens
+                .OrderBy(x => x.KlassenName)
+                .AsNoTracking()
+                .ToListAsync();
+
+            _zimmer = await db.Schulzimmers
+                .OrderBy(x => x.ZimmerBezeichnung)
+                .AsNoTracking()
+                .ToListAsync();
+
+            _entries = await db.Stundenplans
+                .Include(x => x.Lehrer)
+                .Include(x => x.Klassen)
+                .Include(x => x.Zimmer)
+                .OrderBy(x => x.Datum)
+                .ThenBy(x => x.Uhrzeit)
+                .AsNoTracking()
+                .ToListAsync();
+
+            if (_editId is null)
+            {
+                ResetForm();
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Fehler beim Laden: {ex.Message}";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private void StartEdit(BlazorApp.Models.Stundenplan e)
+    {
+        _error = null;
+        _editId = e.StundenplanId;
+        _form = new StundenplanFormModel
+        {
+            KlassenId = e.KlassenId,
+            LehrerId = e.LehrerId,
+            ZimmerId = e.ZimmerId,
+            Datum = e.Datum.ToDateTime(TimeOnly.MinValue)
+        };
+        _form.SetUhrzeit(e.Uhrzeit.ToTimeSpan());
+    }
+
+    private void ResetForm()
+    {
+        _error = null;
+        _editId = null;
+        _form = new StundenplanFormModel
+        {
+            Datum = DateTime.Today,
+            KlassenId = _klassen.Count > 0 ? _klassen[0].KlassenId : 0,
+            LehrerId = _lehrer.Count > 0 ? _lehrer[0].LehrerId : 0,
+            ZimmerId = _zimmer.Count > 0 ? _zimmer[0].ZimmerId : 0
+        };
+        _form.SetUhrzeit(new TimeSpan(8, 0, 0));
+    }
+
+    private async Task SaveAsync()
+    {
+        _error = null;
+        _isSaving = true;
+        try
+        {
+            if (_form.KlassenId <= 0 || _form.LehrerId <= 0 || _form.ZimmerId <= 0)
+            {
+                _error = "Bitte Klasse, Lehrer und Zimmer auswählen.";
+                return;
+            }
+
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            if (_editId is null)
+            {
+                var entity = new BlazorApp.Models.Stundenplan
+                {
+                    KlassenId = _form.KlassenId,
+                    LehrerId = _form.LehrerId,
+                    ZimmerId = _form.ZimmerId,
+                    Datum = DateOnly.FromDateTime(_form.Datum),
+                    Uhrzeit = TimeOnly.FromTimeSpan(_form.Uhrzeit)
+                };
+                db.Stundenplans.Add(entity);
+            }
+            else
+            {
+                var entity = await db.Stundenplans.FirstOrDefaultAsync(x => x.StundenplanId == _editId.Value);
+                if (entity is null)
+                {
+                    _error = "Eintrag wurde nicht gefunden (evtl. bereits gelöscht).";
+                    _editId = null;
+                    return;
+                }
+
+                entity.KlassenId = _form.KlassenId;
+                entity.LehrerId = _form.LehrerId;
+                entity.ZimmerId = _form.ZimmerId;
+                entity.Datum = DateOnly.FromDateTime(_form.Datum);
+                entity.Uhrzeit = TimeOnly.FromTimeSpan(_form.Uhrzeit);
+            }
+
+            await db.SaveChangesAsync();
+            await ReloadAsync();
+            ResetForm();
+        }
+        catch (Exception ex)
+        {
+            _error = $"Fehler beim Speichern: {ex.Message}";
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    private async Task ConfirmDelete(BlazorApp.Models.Stundenplan e)
+    {
+        _error = null;
+        var ok = await JS.InvokeAsync<bool>("confirm",
+            $"Eintrag am {e.Datum:dd.MM.yyyy} um {e.Uhrzeit:HH\\:mm} wirklich löschen?");
+        if (!ok)
+            return;
+
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var entity = await db.Stundenplans.FirstOrDefaultAsync(x => x.StundenplanId == e.StundenplanId);
+            if (entity is null)
+            {
+                await ReloadAsync();
+                return;
+            }
+
+            db.Stundenplans.Remove(entity);
+            await db.SaveChangesAsync();
+            await ReloadAsync();
+
+            if (_editId == e.StundenplanId)
+            {
+                ResetForm();
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Fehler beim Löschen: {ex.Message}";
+        }
+    }
+
+    private sealed class StundenplanFormModel
+    {
+        public int KlassenId { get; set; }
+        public int LehrerId { get; set; }
+        public int ZimmerId { get; set; }
+
+        // Use DateTime/TimeSpan for Blazor form inputs; map to DateOnly/TimeOnly for EF entity.
+        public DateTime Datum { get; set; } = DateTime.Today;
+
+        private TimeSpan _uhrzeit = new(8, 0, 0);
+        public TimeSpan Uhrzeit => _uhrzeit;
+
+        public string UhrzeitText
+        {
+            get => _uhrzeit.ToString(@"hh\:mm");
+            set
+            {
+                if (TimeSpan.TryParse(value, out var ts))
+                {
+                    _uhrzeit = ts;
+                }
+            }
+        }
+
+        public void SetUhrzeit(TimeSpan ts) => _uhrzeit = ts;
+    }
+}
+
+

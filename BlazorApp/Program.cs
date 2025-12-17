@@ -1,10 +1,19 @@
 using BlazorApp.Components;
+using BlazorApp.Models;
+using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
+
+builder.Services.AddDbContextFactory<MyDbContext>(options =>
+{
+    var cs = builder.Configuration.GetConnectionString("StundenplanDb")
+             ?? "Server=localhost\\SQLEXPRESS;Database=StundenplanDB;Trusted_Connection=True;TrustServerCertificate=True;";
+    options.UseSqlServer(cs);
+});
 
 var app = builder.Build();
 

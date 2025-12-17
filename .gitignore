@@ -8,10 +8,13 @@
 *.userosscache
 *.sln.docstates
 .vs/
+**/.vs/
 .vscode/
+**/.vscode/
 
 # Rider / JetBrains
 .idea/
+**/.idea/
 
 # OS files
 Thumbs.db
